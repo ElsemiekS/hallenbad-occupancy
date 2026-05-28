@@ -82,6 +82,7 @@ export default function App() {
   const [data, setData] = useState([]);
   const [hourlyAvgs, setHourlyAvgs] = useState([]);
   const [forecast, setForecast] = useState([]);
+  const [liveReading, setLiveReading] = useState(undefined); // undefined = loading
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -165,6 +166,22 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, customRange]);
 
+  // Latest reading — always the most recent DB row, range-independent. Fetch once on mount.
+  useEffect(() => {
+    if (!isConfigured) {
+      setLiveReading(DEMO_DATA.at(-1) ?? null);
+      return;
+    }
+    supabase
+      .from("occupancy")
+      .select("people_count, recorded_at")
+      .eq("pool_id", "hallenbad_city")
+      .not("people_count", "is", null)
+      .order("recorded_at", { ascending: false })
+      .limit(1)
+      .then(({ data: rows }) => setLiveReading(rows?.[0] ?? null));
+  }, []);
+
   // Forecast is range-independent: always the next 7 days. Fetch once on mount.
   useEffect(() => {
     if (!isConfigured) return; // no Supabase → no predictions
@@ -180,8 +197,11 @@ export default function App() {
       .then(({ data: rows }) => setForecast(rows ?? []));
   }, []);
 
-  const latest = data.at(-1);
-  const current = latest?.people_count;
+  const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+  const liveIsRecent =
+    liveReading != null &&
+    Date.now() - new Date(liveReading.recorded_at).getTime() < THREE_HOURS_MS;
+  const current = liveIsRecent ? liveReading.people_count : null;
 
   return (
     <div className="app">
@@ -192,7 +212,7 @@ export default function App() {
 
       {/* Current count */}
       <section className="card current-card">
-        {loading ? (
+        {liveReading === undefined ? (
           <div className="spinner" />
         ) : current != null ? (
           <>
@@ -201,12 +221,12 @@ export default function App() {
             <Gauge value={current} max={350} />
           </>
         ) : (
-          <div className="current-label">Pool is currently closed</div>
+          <div className="current-label">No live data available</div>
         )}
-        {latest && (
+        {liveIsRecent && (
           <div className="updated-at">
             Last updated:{" "}
-            {new Date(latest.recorded_at).toLocaleTimeString("en-CH", {
+            {new Date(liveReading.recorded_at).toLocaleTimeString("en-CH", {
               hour: "2-digit",
               minute: "2-digit",
             })}
