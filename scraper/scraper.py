@@ -13,6 +13,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
 from supabase import create_client
 
@@ -23,8 +24,9 @@ POOL_URL = (
     "https://www.stadt-zuerich.ch/de/stadtleben/sport-und-erholung"
     "/sport-und-badeanlagen/hallenbaeder/city.html"
 )
-# The HTML element ID that contains the live visitor count
-OCCUPANCY_ELEMENT_ID = "SSD-4"
+# The website changed in 2026: SSD-4 now shows occupancy-level icons (1–4 scale),
+# while SSD-4_visitornumber holds the actual guest count as a plain number.
+OCCUPANCY_ELEMENT_ID = "SSD-4_visitornumber"
 POOL_ID = "hallenbad_city"
 
 
@@ -56,15 +58,26 @@ class HallenbadScraper:
         """Load the page and extract the visitor count element."""
         self._driver.get(POOL_URL)
 
-        # Wait up to 15 s for the occupancy widget to appear (it's JS-rendered)
-        element = WebDriverWait(self._driver, 15).until(
+        # Wait up to 20 s for the element to exist, then up to 20 s more for it
+        # to be populated with a real value (the JS fills it asynchronously).
+        WebDriverWait(self._driver, 20).until(
             EC.presence_of_element_located((By.ID, OCCUPANCY_ELEMENT_ID))
         )
+        try:
+            WebDriverWait(self._driver, 20).until(
+                lambda d: d.find_element(By.ID, OCCUPANCY_ELEMENT_ID).text.strip() not in ("", "-")
+            )
+        except TimeoutException:
+            # Pool is closed or the live-data service is temporarily down
+            log.warning("Visitor count did not populate within 20 s — pool likely closed")
+            return OccupancyReading(pool_id=POOL_ID, people_count=None,
+                                    recorded_at=datetime.now(tz=timezone.utc))
+
+        element = self._driver.find_element(By.ID, OCCUPANCY_ELEMENT_ID)
         raw = element.text.strip()
-        # The website shows "-" when the pool is closed
         count = int(raw) if raw.isdigit() else None
         if count is None:
-            log.warning("Non-numeric occupancy value: %r — pool may be closed", raw)
+            log.warning("Non-numeric occupancy value: %r", raw)
 
         return OccupancyReading(
             pool_id=POOL_ID,
