@@ -5,7 +5,6 @@ import { OccupancyChart } from "./components/OccupancyChart.jsx";
 import { HourlyAverages } from "./components/HourlyAverages.jsx";
 import { DateRangePicker } from "./components/DateRangePicker.jsx";
 import { ForecastChart } from "./components/ForecastChart.jsx";
-import { WeatherStrip } from "./components/WeatherStrip.jsx";
 
 // --- Demo data (used when Supabase is not yet configured) ---------------
 function generateDemoData() {
@@ -306,7 +305,6 @@ export default function App() {
             Predicted occupancy · powered by Darts + Open-Meteo weather ·
             updated daily · accuracy improves as more data accumulates
           </p>
-          <WeatherStrip days={dailyWeather} />
           {forecastModel === "ridge_fallback" && (
             <div className="forecast-fallback-banner">
               Using a simplified model — not enough consecutive data yet for
@@ -314,7 +312,7 @@ export default function App() {
               as more readings accumulate.
             </div>
           )}
-          <ForecastChart data={forecast} />
+          <ForecastChart data={forecast} weather={dailyWeather} />
         </section>
       )}
     </div>
