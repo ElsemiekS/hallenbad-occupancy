@@ -104,24 +104,26 @@ export default function App() {
         return;
       }
 
-      // Row limits by range — longer views fetch more rows because the
-      // frontend aggregates them down to a handful of chart points anyway.
-      const rowLimit = { "24h": 1500, "week": 5000, "month": 15000, "all": 100000 };
-      const limit = customRange
-        ? Math.ceil(autoBucketMs(activeFrom, activeTo) > 86_400_000 ? 100000 : 15000)
-        : (rowLimit[range] ?? 5000);
+      // Use a server-side aggregation function so we never hit Supabase's
+      // 1000-row per-request limit. The DB returns pre-bucketed averages
+      // (≤ ~300 rows), which the chart plots directly as { ts, people_count }.
+      const { data: rows, error: err } = await supabase.rpc(
+        "get_occupancy_bucketed",
+        {
+          p_pool_id:     "hallenbad_city",
+          p_from:        activeFrom.toISOString(),
+          p_to:          activeTo.toISOString(),
+          p_bucket_secs: Math.round(bucketMs / 1000),
+        }
+      );
 
-      const { data: rows, error: err } = await supabase
-        .from("occupancy")
-        .select("recorded_at, people_count")
-        .eq("pool_id", "hallenbad_city")
-        .gte("recorded_at", activeFrom.toISOString())
-        .lte("recorded_at", activeTo.toISOString())
-        .order("recorded_at", { ascending: true })
-        .limit(limit);
-
-      if (err) setError(err.message);
-      else setData(rows ?? []);
+      if (err) {
+        setError(err.message);
+      } else {
+        // RPC returns { bucket, people_count }; map to { recorded_at, people_count }
+        // so demo mode and real mode share the same shape going into aggregateForChart.
+        setData((rows ?? []).map((r) => ({ recorded_at: r.bucket, people_count: r.people_count })));
+      }
       setLoading(false);
     }
     load();
