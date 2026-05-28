@@ -56,17 +56,17 @@ def fetch_occupancy(client) -> pd.DataFrame:
 
 
 def _parse_meteo_response(data: dict) -> pd.DataFrame:
-    """Convert an Open-Meteo JSON response to a UTC-indexed DataFrame."""
+    """Convert an Open-Meteo JSON response to a UTC-indexed DataFrame.
+
+    We request timezone=UTC from Open-Meteo so the timestamps are already UTC
+    — avoids any DST ambiguity issues with Europe/Zurich localization.
+    """
     df = pd.DataFrame({
         "time": pd.to_datetime(data["hourly"]["time"]),
         "temperature_c": data["hourly"]["temperature_2m"],
         "precipitation_mm": data["hourly"]["precipitation"],
     })
-    df["time"] = (
-        df["time"]
-        .dt.tz_localize("Europe/Zurich", ambiguous="infer", nonexistent="shift_forward")
-        .dt.tz_convert("UTC")
-    )
+    df["time"] = df["time"].dt.tz_localize("UTC")
     return df.set_index("time")
 
 
@@ -76,7 +76,7 @@ def fetch_weather_archive(start_date: str, end_date: str) -> pd.DataFrame:
         "latitude": ZURICH_LAT, "longitude": ZURICH_LON,
         "start_date": start_date, "end_date": end_date,
         "hourly": "temperature_2m,precipitation",
-        "timezone": "Europe/Zurich",
+        "timezone": "UTC",
     }, timeout=30)
     r.raise_for_status()
     return _parse_meteo_response(r.json())
@@ -87,7 +87,7 @@ def fetch_weather_forecast(past_days: int = 14) -> pd.DataFrame:
     r = requests.get("https://api.open-meteo.com/v1/forecast", params={
         "latitude": ZURICH_LAT, "longitude": ZURICH_LON,
         "hourly": "temperature_2m,precipitation",
-        "timezone": "Europe/Zurich",
+        "timezone": "UTC",
         "forecast_days": 9,
         "past_days": past_days,
     }, timeout=30)
