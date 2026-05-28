@@ -74,16 +74,17 @@ export function ForecastChart({ data, weather }) {
     value: d.people_count_pred,
   }));
 
-  // Extend the domain back to today's midnight so each day occupies the same
-  // width and the weather tick for today is at the left edge of its column.
   const firstDayMidnight = startOfDay(new Date(chartData[0].ts));
   const lastPoint = new Date(chartData[chartData.length - 1].ts);
 
-  // One tick per midnight, including today's
-  const dayTicks = [];
+  // Midnight timestamps — day separator lines sit here
+  const midnightTicks = [];
   for (let d = firstDayMidnight; d <= lastPoint; d = addDays(d, 1)) {
-    dayTicks.push(d.getTime());
+    midnightTicks.push(d.getTime());
   }
+
+  // Noon timestamps — labels are centered in each day's column
+  const noonTicks = midnightTicks.map((ts) => ts + 12 * 60 * 60 * 1000);
 
   return (
     <ResponsiveContainer width="100%" height={340}>
@@ -95,9 +96,9 @@ export function ForecastChart({ data, weather }) {
           type="number"
           scale="time"
           domain={[firstDayMidnight.getTime(), "dataMax"]}
-          ticks={dayTicks}
+          ticks={noonTicks}
           tick={(props) => <DayTick {...props} weather={weather} />}
-          tickLine={{ stroke: "#e5e7eb" }}
+          tickLine={false}
           interval={0}
         />
 
@@ -117,8 +118,8 @@ export function ForecastChart({ data, weather }) {
 
         <Tooltip content={<CustomTooltip />} />
 
-        {/* Skip the first tick (left edge) to avoid a line on top of the Y-axis */}
-        {dayTicks.slice(1).map((ts) => (
+        {/* Skip the first midnight (left edge) to avoid overlapping the Y-axis */}
+        {midnightTicks.slice(1).map((ts) => (
           <ReferenceLine key={ts} x={ts} stroke="#d1d5db" strokeWidth={1} />
         ))}
 
