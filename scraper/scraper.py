@@ -1,7 +1,11 @@
 """
-Hallenbad City occupancy scraper.
-Reads the live visitor count from the Zurich city website and writes it to Supabase.
-Designed to run as a short-lived process (e.g. GitHub Actions cron every 5 minutes).
+Zürich Badi occupancy scraper.
+Reads the live visitor count from each pool's page on the Zurich city website
+and writes the readings to Supabase. Designed to run as a short-lived process
+(GitHub Actions cron, triggered externally every 5 minutes via cron-job.org).
+
+All pool configuration lives in pools.py — add a new pool there and it is
+picked up automatically here.
 """
 
 import logging
@@ -17,17 +21,10 @@ from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
 from supabase import create_client
 
+from pools import POOLS, PoolConfig
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
-
-POOL_URL = (
-    "https://www.stadt-zuerich.ch/de/stadtleben/sport-und-erholung"
-    "/sport-und-badeanlagen/hallenbaeder/city.html"
-)
-# The website changed in 2026: SSD-4 now shows occupancy-level icons (1–4 scale),
-# while SSD-4_visitornumber holds the actual guest count as a plain number.
-OCCUPANCY_ELEMENT_ID = "SSD-4_visitornumber"
-POOL_ID = "hallenbad_city"
 
 
 @dataclass
@@ -37,8 +34,11 @@ class OccupancyReading:
     recorded_at: datetime
 
 
-class HallenbadScraper:
-    """Fetches the current occupancy from the Zurich Hallenbad City website."""
+class BadiScraper:
+    """
+    Scrapes live occupancy from Stadt Zürich pool pages.
+    One Chrome instance is reused across all pools to keep the run fast.
+    """
 
     def __init__(self) -> None:
         options = Options()
@@ -48,39 +48,45 @@ class HallenbadScraper:
         options.add_argument("--disable-dev-shm-usage")
         self._driver = webdriver.Chrome(options=options)
 
-    def __enter__(self) -> "HallenbadScraper":
+    def __enter__(self) -> "BadiScraper":
         return self
 
     def __exit__(self, *_) -> None:
         self._driver.quit()
 
-    def scrape(self) -> OccupancyReading:
-        """Load the page and extract the visitor count element."""
-        self._driver.get(POOL_URL)
+    def scrape(self, pool: PoolConfig) -> OccupancyReading:
+        """Load the pool page and extract the visitor count element."""
+        self._driver.get(pool.url)
 
         # Wait up to 20 s for the element to exist, then up to 20 s more for it
         # to be populated with a real value (the JS fills it asynchronously).
-        WebDriverWait(self._driver, 20).until(
-            EC.presence_of_element_located((By.ID, OCCUPANCY_ELEMENT_ID))
-        )
         try:
             WebDriverWait(self._driver, 20).until(
-                lambda d: d.find_element(By.ID, OCCUPANCY_ELEMENT_ID).text.strip() not in ("", "-")
+                EC.presence_of_element_located((By.ID, pool.element_id))
+            )
+        except TimeoutException:
+            log.warning("[%s] Element %r not found within 20 s — skipping", pool.pool_id, pool.element_id)
+            return OccupancyReading(pool_id=pool.pool_id, people_count=None,
+                                    recorded_at=datetime.now(tz=timezone.utc))
+
+        try:
+            WebDriverWait(self._driver, 20).until(
+                lambda d: d.find_element(By.ID, pool.element_id).text.strip() not in ("", "-")
             )
         except TimeoutException:
             # Pool is closed or the live-data service is temporarily down
-            log.warning("Visitor count did not populate within 20 s — pool likely closed")
-            return OccupancyReading(pool_id=POOL_ID, people_count=None,
+            log.warning("[%s] Visitor count did not populate within 20 s — pool likely closed", pool.pool_id)
+            return OccupancyReading(pool_id=pool.pool_id, people_count=None,
                                     recorded_at=datetime.now(tz=timezone.utc))
 
-        element = self._driver.find_element(By.ID, OCCUPANCY_ELEMENT_ID)
+        element = self._driver.find_element(By.ID, pool.element_id)
         raw = element.text.strip()
         count = int(raw) if raw.isdigit() else None
         if count is None:
-            log.warning("Non-numeric occupancy value: %r", raw)
+            log.warning("[%s] Non-numeric occupancy value: %r", pool.pool_id, raw)
 
         return OccupancyReading(
-            pool_id=POOL_ID,
+            pool_id=pool.pool_id,
             people_count=count,
             recorded_at=datetime.now(tz=timezone.utc),
         )
@@ -106,19 +112,23 @@ class SupabaseWriter:
             }
         ).execute()
         log.info(
-            "Saved: %s people at %s",
+            "[%s] Saved: %s people at %s UTC",
+            reading.pool_id,
             reading.people_count,
-            reading.recorded_at.strftime("%H:%M UTC"),
+            reading.recorded_at.strftime("%H:%M"),
         )
 
 
 def main() -> None:
-    with HallenbadScraper() as scraper:
-        reading = scraper.scrape()
-
-    log.info("Scraped: %s people", reading.people_count)
     writer = SupabaseWriter()
-    writer.write(reading)
+    with BadiScraper() as scraper:
+        for pool in POOLS:
+            try:
+                reading = scraper.scrape(pool)
+                writer.write(reading)
+            except Exception as exc:
+                # Log and continue — one failing pool should not block the others
+                log.error("[%s] Scrape failed: %s", pool.pool_id, exc)
 
 
 if __name__ == "__main__":

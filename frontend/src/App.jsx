@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import { subHours, subDays, subMonths, startOfDay, endOfDay } from "date-fns";
+import { subHours, subDays, subMonths } from "date-fns";
 import { supabase, isConfigured } from "./supabase.js";
+import { POOL_LIST, POOL_BY_ID } from "./pools.js";
+import { PoolSelector } from "./components/PoolSelector.jsx";
 import { OccupancyChart } from "./components/OccupancyChart.jsx";
 import { HourlyAverages } from "./components/HourlyAverages.jsx";
-import { DateRangePicker } from "./components/DateRangePicker.jsx";
 import { ForecastChart } from "./components/ForecastChart.jsx";
+import { DateRangePicker } from "./components/DateRangePicker.jsx";
 
-// --- Demo data (used when Supabase is not yet configured) ---------------
+// ── Demo data ─────────────────────────────────────────────────────────────────
 function generateDemoData() {
   const rows = [];
   const now = Date.now();
@@ -22,8 +24,18 @@ function generateDemoData() {
   return rows;
 }
 const DEMO_DATA = generateDemoData();
-// ------------------------------------------------------------------------
 
+function demoHourlyAverages() {
+  const buckets = Array.from({ length: 24 }, (_, h) => ({ hour: h, sum: 0, n: 0 }));
+  for (const d of DEMO_DATA) {
+    if (d.people_count == null) continue;
+    buckets[new Date(d.recorded_at).getHours()].sum += d.people_count;
+    buckets[new Date(d.recorded_at).getHours()].n += 1;
+  }
+  return buckets.filter((b) => b.n > 0).map((b) => ({ hour: b.hour, avg_people: Math.round(b.sum / b.n) }));
+}
+
+// ── Range config ──────────────────────────────────────────────────────────────
 const RANGES = [
   { label: "24 hours", key: "24h",   from: () => subHours(new Date(), 24) },
   { label: "7 days",   key: "week",  from: () => subDays(new Date(), 7) },
@@ -38,7 +50,6 @@ const BUCKET_MS = {
   "all":   24 * 60 * 60 * 1000,
 };
 
-// Pick a sensible bucket size for an arbitrary date range
 function autoBucketMs(from, to) {
   const days = (to - from) / 86_400_000;
   if (days <= 2)  return 5  * 60 * 1000;
@@ -63,51 +74,34 @@ function aggregateForChart(data, bucketMs) {
     .map(([ts, { sum, n }]) => ({ ts, people_count: Math.round(sum / n) }));
 }
 
-// Compute hour-of-day averages from demo data (used when Supabase is not configured)
-function demoHourlyAverages() {
-  const buckets = Array.from({ length: 24 }, (_, h) => ({ hour: h, sum: 0, n: 0 }));
-  for (const d of DEMO_DATA) {
-    if (d.people_count == null) continue;
-    buckets[new Date(d.recorded_at).getHours()].sum += d.people_count;
-    buckets[new Date(d.recorded_at).getHours()].n += 1;
-  }
-  return buckets
-    .filter((b) => b.n > 0)
-    .map((b) => ({ hour: b.hour, avg_people: Math.round(b.sum / b.n) }));
-}
+const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
 
+// ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
+  const [selectedPools, setSelectedPools] = useState(["hallenbad_city"]);
   const [range, setRange] = useState("week");
-  const [customRange, setCustomRange] = useState(null); // { from: Date, to: Date } or null
-  const [data, setData] = useState([]);
-  const [hourlyAvgs, setHourlyAvgs] = useState([]);
-  const [forecast, setForecast] = useState([]);
-  const [forecastModel, setForecastModel] = useState(null);
-  const [dailyWeather, setDailyWeather] = useState([]);
-  const [liveReading, setLiveReading] = useState(undefined); // undefined = loading
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [customRange, setCustomRange] = useState(null);
 
-  // Clicking a preset tab clears any custom range
-  function selectRange(key) {
-    setCustomRange(null);
-    setRange(key);
-  }
+  // Pool-keyed data maps
+  const [chartData,    setChartData]    = useState({}); // { poolId: [{ts,people_count}] }
+  const [hourlyData,   setHourlyData]   = useState({}); // { poolId: [{hour,avg_people}] }
+  const [forecastData, setForecastData] = useState({}); // { poolId: [{forecast_at,people_count_pred,model_name}] }
+  const [liveReadings, setLiveReadings] = useState({}); // { poolId: {people_count,recorded_at} | null }
+  const [dailyWeather, setDailyWeather] = useState([]);
+
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState(null);
+
+  function selectRange(key) { setCustomRange(null); setRange(key); }
 
   const activeFrom = customRange?.from ?? RANGES.find((r) => r.key === range).from();
   const activeTo   = customRange?.to   ?? new Date();
+  const bucketMs   = customRange ? autoBucketMs(activeFrom, activeTo) : BUCKET_MS[range];
+  const chartRange = bucketMs <= 5 * 60 * 1000      ? "24h"
+                   : bucketMs <= 60 * 60 * 1000     ? "week"
+                   : bucketMs <= 6 * 60 * 60 * 1000 ? "month" : "all";
 
-  // Bucket size for the current view
-  const bucketMs = customRange
-    ? autoBucketMs(activeFrom, activeTo)
-    : BUCKET_MS[range];
-
-  // Recharts range key hint for axis formatting (derived from bucket size)
-  const chartRange = bucketMs <= 5 * 60 * 1000   ? "24h"
-                   : bucketMs <= 60 * 60 * 1000   ? "week"
-                   : bucketMs <= 6 * 60 * 60 * 1000 ? "month"
-                   : "all";
-
+  // ── time-series chart data ────────────────────────────────────────────────
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -118,73 +112,109 @@ export default function App() {
           const t = new Date(d.recorded_at);
           return t >= activeFrom && t <= activeTo;
         });
-        setData(filtered);
+        setChartData({ hallenbad_city: aggregateForChart(filtered, bucketMs) });
         setLoading(false);
         return;
       }
 
-      // Use a server-side aggregation function so we never hit Supabase's
-      // 1000-row per-request limit. The DB returns pre-bucketed averages
-      // (≤ ~300 rows), which the chart plots directly as { ts, people_count }.
-      const { data: rows, error: err } = await supabase.rpc(
-        "get_occupancy_bucketed",
-        {
-          p_pool_id:     "hallenbad_city",
-          p_from:        activeFrom.toISOString(),
-          p_to:          activeTo.toISOString(),
-          p_bucket_secs: Math.round(bucketMs / 1000),
-        }
+      const results = await Promise.all(
+        selectedPools.map((poolId) =>
+          supabase.rpc("get_occupancy_bucketed", {
+            p_pool_id: poolId,
+            p_from: activeFrom.toISOString(),
+            p_to: activeTo.toISOString(),
+            p_bucket_secs: Math.round(bucketMs / 1000),
+          }).then(({ data: rows, error: err }) => ({ poolId, rows, err }))
+        )
       );
 
-      if (err) {
-        setError(err.message);
-      } else {
-        // RPC returns { bucket, people_count }; map to { recorded_at, people_count }
-        // so demo mode and real mode share the same shape going into aggregateForChart.
-        setData((rows ?? []).map((r) => ({ recorded_at: r.bucket, people_count: r.people_count })));
+      const newData = {};
+      for (const { poolId, rows, err } of results) {
+        if (err) { setError(err.message); continue; }
+        newData[poolId] = (rows ?? []).map((r) => ({ ts: new Date(r.bucket).getTime(), people_count: r.people_count }));
       }
+      setChartData(newData);
       setLoading(false);
     }
     load();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range, customRange]);
+  }, [range, customRange, selectedPools.join(",")]);
 
-  // Separate fetch for the "average by hour of day" chart.
-  // Runs whenever the time window changes so it reflects the selected period.
+  // ── hourly averages ───────────────────────────────────────────────────────
   useEffect(() => {
     async function loadHourly() {
       if (!isConfigured) {
-        setHourlyAvgs(demoHourlyAverages());
+        setHourlyData({ hallenbad_city: demoHourlyAverages() });
         return;
       }
-      const { data: rows } = await supabase.rpc("get_hourly_averages", {
-        p_pool_id: "hallenbad_city",
-        p_from: activeFrom.toISOString(),
-        p_to: activeTo.toISOString(),
-      });
-      setHourlyAvgs(rows ?? []);
+      const results = await Promise.all(
+        selectedPools.map((poolId) =>
+          supabase.rpc("get_hourly_averages", {
+            p_pool_id: poolId,
+            p_from: activeFrom.toISOString(),
+            p_to: activeTo.toISOString(),
+          }).then(({ data: rows }) => ({ poolId, rows }))
+        )
+      );
+      const newData = {};
+      for (const { poolId, rows } of results) newData[poolId] = rows ?? [];
+      setHourlyData(newData);
     }
     loadHourly();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range, customRange]);
+  }, [range, customRange, selectedPools.join(",")]);
 
-  // Latest reading — always the most recent DB row, range-independent. Fetch once on mount.
+  // ── live readings (once on mount + when selected pools change) ────────────
   useEffect(() => {
     if (!isConfigured) {
-      setLiveReading(DEMO_DATA.at(-1) ?? null);
+      const last = DEMO_DATA.at(-1);
+      setLiveReadings({ hallenbad_city: last ?? null });
       return;
     }
-    supabase
-      .from("occupancy")
-      .select("people_count, recorded_at")
-      .eq("pool_id", "hallenbad_city")
-      .not("people_count", "is", null)
-      .order("recorded_at", { ascending: false })
-      .limit(1)
-      .then(({ data: rows }) => setLiveReading(rows?.[0] ?? null));
-  }, []);
+    Promise.all(
+      selectedPools.map((poolId) =>
+        supabase
+          .from("occupancy")
+          .select("people_count, recorded_at")
+          .eq("pool_id", poolId)
+          .not("people_count", "is", null)
+          .order("recorded_at", { ascending: false })
+          .limit(1)
+          .then(({ data: rows }) => ({ poolId, reading: rows?.[0] ?? null }))
+      )
+    ).then((results) => {
+      const newData = {};
+      for (const { poolId, reading } of results) newData[poolId] = reading;
+      setLiveReadings(newData);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPools.join(",")]);
 
-  // Daily weather for the forecast strip — fetched directly from Open-Meteo.
+  // ── forecast (once on mount + when selected pools change) ─────────────────
+  useEffect(() => {
+    if (!isConfigured) return;
+    const now = new Date();
+    const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    Promise.all(
+      selectedPools.map((poolId) =>
+        supabase
+          .from("predictions")
+          .select("forecast_at, people_count_pred, model_name")
+          .eq("pool_id", poolId)
+          .gte("forecast_at", now.toISOString())
+          .lte("forecast_at", in7Days.toISOString())
+          .order("forecast_at", { ascending: true })
+          .then(({ data: rows }) => ({ poolId, rows: rows ?? [] }))
+      )
+    ).then((results) => {
+      const newData = {};
+      for (const { poolId, rows } of results) newData[poolId] = rows;
+      setForecastData(newData);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPools.join(",")]);
+
+  // ── daily weather for forecast strip ─────────────────────────────────────
   useEffect(() => {
     fetch(
       "https://api.open-meteo.com/v1/forecast" +
@@ -199,65 +229,59 @@ export default function App() {
           maxTemp: Math.round(data.daily.temperature_2m_max[i]),
           precip: data.daily.precipitation_sum[i] ?? 0,
         }));
-        setDailyWeather(days.slice(0, 7)); // today + next 6 days, matching the chart
+        setDailyWeather(days.slice(0, 7));
       })
-      .catch(() => {}); // silently ignore if Open-Meteo is unreachable
+      .catch(() => {});
   }, []);
 
-  // Forecast is range-independent: always the next 7 days. Fetch once on mount.
-  useEffect(() => {
-    if (!isConfigured) return; // no Supabase → no predictions
-    const now = new Date();
-    const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    supabase
-      .from("predictions")
-      .select("forecast_at, people_count_pred, model_name")
-      .eq("pool_id", "hallenbad_city")
-      .gte("forecast_at", now.toISOString())
-      .lte("forecast_at", in7Days.toISOString())
-      .order("forecast_at", { ascending: true })
-      .then(({ data: rows }) => {
-        setForecast(rows ?? []);
-        setForecastModel(rows?.[0]?.model_name ?? null);
-      });
-  }, []);
-
-  const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
-  const liveIsRecent =
-    liveReading != null &&
-    Date.now() - new Date(liveReading.recorded_at).getTime() < THREE_HOURS_MS;
-  const current = liveIsRecent ? liveReading.people_count : null;
+  // ── derived series for charts ─────────────────────────────────────────────
+  const chartSeries   = selectedPools.map((id) => ({ pool: POOL_BY_ID[id], data: chartData[id]   ?? [] }));
+  const hourlySeries  = selectedPools.map((id) => ({ pool: POOL_BY_ID[id], data: hourlyData[id]  ?? [] }));
+  const forecastSeries= selectedPools.map((id) => ({ pool: POOL_BY_ID[id], data: forecastData[id]?? [] }));
 
   return (
     <div className="app">
       <header className="header">
-        <h1 className="title">🏊 Hallenbad City</h1>
+        <h1 className="title">🏊 Zürich Bäder</h1>
         <p className="subtitle">Live occupancy tracker · Zürich</p>
       </header>
 
-      {/* Current count */}
-      <section className="card current-card">
-        {liveReading === undefined ? (
-          <div className="spinner" />
-        ) : current != null ? (
-          <>
-            <div className="current-count">{current}</div>
-            <div className="current-label">people in the pool right now</div>
-            <Gauge value={current} max={350} />
-          </>
-        ) : (
-          <div className="current-label">No live data available</div>
-        )}
-        {liveIsRecent && (
-          <div className="updated-at">
-            Last updated:{" "}
-            {new Date(liveReading.recorded_at).toLocaleTimeString("en-CH", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </div>
-        )}
-      </section>
+      {/* Pool selector */}
+      <PoolSelector selectedPools={selectedPools} onChange={setSelectedPools} />
+
+      {/* Live count cards — one per selected pool */}
+      <div className="live-cards">
+        {selectedPools.map((poolId) => {
+          const pool = POOL_BY_ID[poolId];
+          const reading = liveReadings[poolId];
+          const isRecent = reading && Date.now() - new Date(reading.recorded_at).getTime() < THREE_HOURS_MS;
+          const count = isRecent ? reading.people_count : null;
+          return (
+            <section key={poolId} className="card live-card" style={{ "--pool-color": pool.color }}>
+              <div className="live-card-header">
+                <span className="live-card-dot" style={{ background: pool.color }} />
+                <span className="live-card-name">{pool.short}</span>
+              </div>
+              {reading === undefined ? (
+                <div className="spinner" />
+              ) : count != null ? (
+                <>
+                  <div className="current-count" style={{ color: pool.color }}>{count}</div>
+                  <div className="current-label">people now</div>
+                  <Gauge value={count} max={350} color={pool.color} />
+                </>
+              ) : (
+                <div className="current-label">No live data</div>
+              )}
+              {isRecent && (
+                <div className="updated-at">
+                  {new Date(reading.recorded_at).toLocaleTimeString("en-CH", { hour: "2-digit", minute: "2-digit" })}
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
 
       {!isConfigured && (
         <div className="demo-banner">
@@ -265,7 +289,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Range selector: preset tabs + custom date picker */}
+      {/* Range selector */}
       <div className="range-tabs">
         {RANGES.map((r) => (
           <button
@@ -276,14 +300,10 @@ export default function App() {
             {r.label}
           </button>
         ))}
-        <DateRangePicker
-          value={customRange}
-          onChange={setCustomRange}
-          onClear={() => setCustomRange(null)}
-        />
+        <DateRangePicker value={customRange} onChange={setCustomRange} onClear={() => setCustomRange(null)} />
       </div>
 
-      {/* Time series chart */}
+      {/* Occupancy over time */}
       <section className="card">
         <h2 className="card-title">Occupancy over time</h2>
         {error ? (
@@ -291,13 +311,16 @@ export default function App() {
         ) : loading ? (
           <div className="chart-loading">Loading…</div>
         ) : (
-          <OccupancyChart data={aggregateForChart(data, bucketMs)} range={chartRange} />
+          <OccupancyChart series={chartSeries} range={chartRange} />
         )}
       </section>
 
-      {hourlyAvgs.length > 0 && <HourlyAverages data={hourlyAvgs} />}
+      {/* Hourly averages */}
+      {hourlySeries.some((s) => s.data.length > 0) && (
+        <HourlyAverages series={hourlySeries} />
+      )}
 
-      {/* 7-day forecast — always shown (empty state when predictions haven't run yet) */}
+      {/* 7-day forecast */}
       {isConfigured && (
         <section className="card">
           <h2 className="card-title">7-day forecast</h2>
@@ -305,23 +328,15 @@ export default function App() {
             Predicted occupancy · powered by Darts + Open-Meteo weather ·
             updated daily · accuracy improves as more data accumulates
           </p>
-          {forecastModel === "ridge_fallback" && (
-            <div className="forecast-fallback-banner">
-              Using a simplified model — not enough consecutive data yet for
-              the full time-series model. Predictions will improve automatically
-              as more readings accumulate.
-            </div>
-          )}
-          <ForecastChart data={forecast} weather={dailyWeather} />
+          <ForecastChart series={forecastSeries} weather={dailyWeather} />
         </section>
       )}
     </div>
   );
 }
 
-function Gauge({ value, max }) {
+function Gauge({ value, max, color }) {
   const pct = Math.min(100, Math.round((value / max) * 100));
-  const color = pct < 40 ? "#22c55e" : pct < 70 ? "#f59e0b" : "#ef4444";
   return (
     <div className="gauge-track">
       <div className="gauge-fill" style={{ width: `${pct}%`, background: color }} />

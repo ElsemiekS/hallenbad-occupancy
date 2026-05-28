@@ -31,17 +31,41 @@ body {
 .card-title    { font-size: 1rem; font-weight: 600; margin-bottom: 4px; }
 .card-subtitle { font-size: 0.8rem; color: #6b7280; margin-bottom: 14px; }
 
-/* ── Current count card ──────────────────────────── */
-.current-card { text-align: center; }
+/* ── Live cards (one per selected pool) ──────────── */
+.live-cards {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.live-card {
+  flex: 1;
+  min-width: 140px;
+  text-align: center;
+  border-top: 3px solid var(--pool-color, #2563eb);
+  padding: 14px 16px 12px;
+}
+.live-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.live-card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.live-card-name { font-size: 0.78rem; font-weight: 600; color: #374151; }
 .current-count {
-  font-size: 5rem;
+  font-size: 3rem;
   font-weight: 800;
   line-height: 1;
-  color: #2563eb;
-  letter-spacing: -2px;
+  letter-spacing: -1px;
 }
-.current-label { color: #6b7280; margin-top: 4px; font-size: 0.95rem; }
-.updated-at    { color: #9ca3af; font-size: 0.75rem; margin-top: 10px; }
+.current-label { color: #6b7280; margin-top: 2px; font-size: 0.85rem; }
+.updated-at    { color: #9ca3af; font-size: 0.72rem; margin-top: 8px; }
 
 /* ── Gauge ───────────────────────────────────────── */
 .gauge-track {
@@ -56,6 +80,34 @@ body {
   height: 100%;
   border-radius: 99px;
   transition: width 0.4s ease, background 0.4s ease;
+}
+
+/* ── Pool selector ───────────────────────────────── */
+.pool-selector {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pool-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 99px;
+  border: 1.5px solid;
+  background: #fff;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  color: #374151;
+}
+.pool-chip.active { color: #fff; font-weight: 600; }
+.pool-chip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 /* ── Range tabs ──────────────────────────────────── */
@@ -91,8 +143,20 @@ body {
   color: #f9fafb;
   box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
-.tooltip-time  { color: #9ca3af; margin-bottom: 2px; }
+.tooltip-time  { color: #9ca3af; margin-bottom: 4px; }
 .tooltip-count { font-weight: 600; }
+.tooltip-pool-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+.tooltip-pool-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
 
 /* ── Date range picker ───────────────────────────── */
 .rdp-wrapper {
