@@ -5,6 +5,7 @@ import { OccupancyChart } from "./components/OccupancyChart.jsx";
 import { HourlyAverages } from "./components/HourlyAverages.jsx";
 import { DateRangePicker } from "./components/DateRangePicker.jsx";
 import { ForecastChart } from "./components/ForecastChart.jsx";
+import { WeatherStrip } from "./components/WeatherStrip.jsx";
 
 // --- Demo data (used when Supabase is not yet configured) ---------------
 function generateDemoData() {
@@ -83,6 +84,7 @@ export default function App() {
   const [hourlyAvgs, setHourlyAvgs] = useState([]);
   const [forecast, setForecast] = useState([]);
   const [forecastModel, setForecastModel] = useState(null);
+  const [dailyWeather, setDailyWeather] = useState([]);
   const [liveReading, setLiveReading] = useState(undefined); // undefined = loading
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -181,6 +183,26 @@ export default function App() {
       .order("recorded_at", { ascending: false })
       .limit(1)
       .then(({ data: rows }) => setLiveReading(rows?.[0] ?? null));
+  }, []);
+
+  // Daily weather for the forecast strip — fetched directly from Open-Meteo.
+  useEffect(() => {
+    fetch(
+      "https://api.open-meteo.com/v1/forecast" +
+      "?latitude=47.3769&longitude=8.5417" +
+      "&daily=temperature_2m_max,precipitation_sum" +
+      "&timezone=Europe%2FZurich&forecast_days=8"
+    )
+      .then((r) => r.json())
+      .then((data) => {
+        const days = data.daily.time.map((date, i) => ({
+          date,
+          maxTemp: Math.round(data.daily.temperature_2m_max[i]),
+          precip: data.daily.precipitation_sum[i] ?? 0,
+        }));
+        setDailyWeather(days.slice(0, 7)); // today + next 6 days, matching the chart
+      })
+      .catch(() => {}); // silently ignore if Open-Meteo is unreachable
   }, []);
 
   // Forecast is range-independent: always the next 7 days. Fetch once on mount.
@@ -284,6 +306,7 @@ export default function App() {
             Predicted occupancy · powered by Darts + Open-Meteo weather ·
             updated daily · accuracy improves as more data accumulates
           </p>
+          <WeatherStrip days={dailyWeather} />
           {forecastModel === "ridge_fallback" && (
             <div className="forecast-fallback-banner">
               Using a simplified model — not enough consecutive data yet for
