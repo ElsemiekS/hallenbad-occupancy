@@ -18,7 +18,7 @@ class PoolConfig:
 POOLS: list[PoolConfig] = [
     PoolConfig(
         pool_id="hallenbad_city",
-        url="https://www.stadt-zuerich.ch/de/stadtleben/sport-und-erholung/sport-und-badeanlagen/schwimmbad-und-hallenbad/hallenbad-city.html",
+        url="https://www.stadt-zuerich.ch/web/de/stadtleben/sport-und-erholung/sport-und-badeanlagen/hallenbaeder/city.html",
         element_id="SSD-4_visitornumber",
         open_start=6,
         open_end=22,
