@@ -1,11 +1,9 @@
 name: Scrape Hallenbad Occupancy
 
 on:
-  # Runs every 5 minutes (GitHub Actions minimum; fine for occupancy data)
-  # NOTE: requires a public repo for unlimited free minutes.
-  schedule:
-    - cron: "*/5 * * * *"
-  # Also allow a manual run from the Actions tab
+  # Triggered externally every 5 minutes by cron-job.org via workflow_dispatch.
+  # The built-in schedule was removed because GitHub's cron is unreliable at
+  # short intervals — cron-job.org provides a more consistent external trigger.
   workflow_dispatch:
 
 jobs:
