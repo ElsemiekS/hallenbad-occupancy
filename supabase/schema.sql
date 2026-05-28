@@ -50,3 +50,51 @@ ALTER TABLE occupancy ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "public read"
     ON occupancy FOR SELECT
     USING (true);
+
+-- ── Hourly averages by time-of-day ─────────────────────────────────────────
+-- Used by the frontend "Average by hour of day" chart. Returns Zürich local
+-- hours so the bars reflect the pool's actual daily rhythm.
+CREATE OR REPLACE FUNCTION get_hourly_averages(
+  p_pool_id TEXT,
+  p_from    TIMESTAMPTZ,
+  p_to      TIMESTAMPTZ
+)
+RETURNS TABLE (hour INTEGER, avg_people INTEGER)
+LANGUAGE SQL
+SECURITY DEFINER
+AS $$
+  SELECT
+    EXTRACT(HOUR FROM recorded_at AT TIME ZONE 'Europe/Zurich')::INTEGER AS hour,
+    ROUND(AVG(people_count))::INTEGER AS avg_people
+  FROM occupancy
+  WHERE pool_id = p_pool_id
+    AND recorded_at >= p_from
+    AND recorded_at <= p_to
+    AND people_count IS NOT NULL
+  GROUP BY 1
+  ORDER BY 1;
+$$;
+
+GRANT EXECUTE ON FUNCTION get_hourly_averages TO anon;
+
+-- ── 7-day rolling predictions ───────────────────────────────────────────────
+-- Written by the daily predict.py job; read by the frontend forecast section.
+-- Each row is one predicted hour; generated_at tracks when the model ran.
+
+CREATE TABLE IF NOT EXISTS predictions (
+    id               BIGSERIAL    PRIMARY KEY,
+    pool_id          TEXT         NOT NULL DEFAULT 'hallenbad_city',
+    forecast_at      TIMESTAMPTZ  NOT NULL,
+    people_count_pred INTEGER     NOT NULL,
+    generated_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    UNIQUE (pool_id, forecast_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_predictions_pool_time
+    ON predictions (pool_id, forecast_at);
+
+ALTER TABLE predictions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "public read"
+    ON predictions FOR SELECT
+    USING (true);

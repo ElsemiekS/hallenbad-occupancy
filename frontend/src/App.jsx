@@ -4,6 +4,7 @@ import { supabase, isConfigured } from "./supabase.js";
 import { OccupancyChart } from "./components/OccupancyChart.jsx";
 import { HourlyAverages } from "./components/HourlyAverages.jsx";
 import { DateRangePicker } from "./components/DateRangePicker.jsx";
+import { ForecastChart } from "./components/ForecastChart.jsx";
 
 // --- Demo data (used when Supabase is not yet configured) ---------------
 function generateDemoData() {
@@ -80,6 +81,7 @@ export default function App() {
   const [customRange, setCustomRange] = useState(null); // { from: Date, to: Date } or null
   const [data, setData] = useState([]);
   const [hourlyAvgs, setHourlyAvgs] = useState([]);
+  const [forecast, setForecast] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -163,6 +165,21 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, customRange]);
 
+  // Forecast is range-independent: always the next 7 days. Fetch once on mount.
+  useEffect(() => {
+    if (!isConfigured) return; // no Supabase → no predictions
+    const now = new Date();
+    const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    supabase
+      .from("predictions")
+      .select("forecast_at, people_count_pred")
+      .eq("pool_id", "hallenbad_city")
+      .gte("forecast_at", now.toISOString())
+      .lte("forecast_at", in7Days.toISOString())
+      .order("forecast_at", { ascending: true })
+      .then(({ data: rows }) => setForecast(rows ?? []));
+  }, []);
+
   const latest = data.at(-1);
   const current = latest?.people_count;
 
@@ -234,6 +251,18 @@ export default function App() {
       </section>
 
       {hourlyAvgs.length > 0 && <HourlyAverages data={hourlyAvgs} />}
+
+      {/* 7-day forecast — always shown (empty state when predictions haven't run yet) */}
+      {isConfigured && (
+        <section className="card">
+          <h2 className="card-title">7-day forecast</h2>
+          <p className="card-subtitle">
+            Predicted occupancy · powered by Darts + Open-Meteo weather ·
+            updated daily · accuracy improves as more data accumulates
+          </p>
+          <ForecastChart data={forecast} />
+        </section>
+      )}
     </div>
   );
 }

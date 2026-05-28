@@ -177,6 +177,13 @@ body {
   color: #6b7280;
   font-size: 0.9rem;
 }
+.forecast-empty {
+  height: 120px;
+  text-align: center;
+  max-width: 440px;
+  margin: 0 auto;
+  line-height: 1.5;
+}
 .error { color: #ef4444; }
 
 .spinner {

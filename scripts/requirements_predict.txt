@@ -1,0 +1,6 @@
+darts
+scikit-learn
+requests
+supabase==2.5.0
+pandas
+numpy
