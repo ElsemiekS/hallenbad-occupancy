@@ -26,11 +26,40 @@ const DEMO_DATA = generateDemoData();
 // ------------------------------------------------------------------------
 
 const RANGES = [
-  { label: "24 hours", key: "24h", from: () => subHours(new Date(), 24) },
-  { label: "7 days",   key: "week", from: () => subDays(new Date(), 7) },
+  { label: "24 hours", key: "24h",   from: () => subHours(new Date(), 24) },
+  { label: "7 days",   key: "week",  from: () => subDays(new Date(), 7) },
   { label: "30 days",  key: "month", from: () => subMonths(new Date(), 1) },
-  { label: "All time", key: "all",  from: () => new Date(0) },
+  { label: "All time", key: "all",   from: () => new Date(0) },
 ];
+
+// Bucket sizes for each range — longer views get aggregated so the chart stays readable
+// and each bucket of time always takes the same horizontal space.
+const BUCKET_MS = {
+  "24h":   5  * 60 * 1000,        // keep raw ~5-min readings
+  "week":  60 * 60 * 1000,        // hourly averages
+  "month": 6  * 60 * 60 * 1000,   // 6-hour averages
+  "all":   24 * 60 * 60 * 1000,   // daily averages
+};
+
+function aggregateForChart(data, range) {
+  const bucketMs = BUCKET_MS[range];
+  const buckets = new Map();
+
+  for (const d of data) {
+    if (d.people_count == null) continue;
+    const ts = new Date(d.recorded_at).getTime();
+    // Snap to bucket start so each bucket has a deterministic timestamp
+    const bucket = Math.floor(ts / bucketMs) * bucketMs;
+    if (!buckets.has(bucket)) buckets.set(bucket, { sum: 0, n: 0 });
+    const b = buckets.get(bucket);
+    b.sum += d.people_count;
+    b.n++;
+  }
+
+  return [...buckets.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([ts, { sum, n }]) => ({ ts, people_count: Math.round(sum / n) }));
+}
 
 export default function App() {
   const [range, setRange] = useState("week");
@@ -133,7 +162,7 @@ export default function App() {
         ) : loading ? (
           <div className="chart-loading">Loading…</div>
         ) : (
-          <OccupancyChart data={data} range={range} />
+          <OccupancyChart data={aggregateForChart(data, range)} range={range} />
         )}
       </section>
 
