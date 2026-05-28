@@ -1,0 +1,25 @@
+# Dependencies
+frontend/node_modules/
+node_modules/
+
+# Build output
+frontend/dist/
+
+# Environment secrets
+.env
+.env.local
+frontend/.env.local
+
+# Claude Code internals
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
+
+# Soup debug file
+soup.txt
