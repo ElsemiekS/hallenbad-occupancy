@@ -1,0 +1,2 @@
+selenium==4.21.0
+supabase==2.5.0
