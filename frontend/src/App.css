@@ -184,6 +184,15 @@ body {
   margin: 0 auto;
   line-height: 1.5;
 }
+.forecast-fallback-banner {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 0.8rem;
+  color: #92400e;
+  margin-bottom: 12px;
+}
 .error { color: #ef4444; }
 
 .spinner {

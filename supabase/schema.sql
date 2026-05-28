@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS predictions (
     pool_id          TEXT         NOT NULL DEFAULT 'hallenbad_city',
     forecast_at      TIMESTAMPTZ  NOT NULL,
     people_count_pred INTEGER     NOT NULL,
+    model_name       TEXT         NOT NULL DEFAULT 'unknown',
     generated_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     UNIQUE (pool_id, forecast_at)
 );

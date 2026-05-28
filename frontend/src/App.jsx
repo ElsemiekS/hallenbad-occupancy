@@ -82,6 +82,7 @@ export default function App() {
   const [data, setData] = useState([]);
   const [hourlyAvgs, setHourlyAvgs] = useState([]);
   const [forecast, setForecast] = useState([]);
+  const [forecastModel, setForecastModel] = useState(null);
   const [liveReading, setLiveReading] = useState(undefined); // undefined = loading
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -189,12 +190,15 @@ export default function App() {
     const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     supabase
       .from("predictions")
-      .select("forecast_at, people_count_pred")
+      .select("forecast_at, people_count_pred, model_name")
       .eq("pool_id", "hallenbad_city")
       .gte("forecast_at", now.toISOString())
       .lte("forecast_at", in7Days.toISOString())
       .order("forecast_at", { ascending: true })
-      .then(({ data: rows }) => setForecast(rows ?? []));
+      .then(({ data: rows }) => {
+        setForecast(rows ?? []);
+        setForecastModel(rows?.[0]?.model_name ?? null);
+      });
   }, []);
 
   const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
@@ -280,6 +284,13 @@ export default function App() {
             Predicted occupancy · powered by Darts + Open-Meteo weather ·
             updated daily · accuracy improves as more data accumulates
           </p>
+          {forecastModel === "ridge_fallback" && (
+            <div className="forecast-fallback-banner">
+              Using a simplified model — not enough consecutive data yet for
+              the full time-series model. Predictions will improve automatically
+              as more readings accumulate.
+            </div>
+          )}
           <ForecastChart data={forecast} />
         </section>
       )}

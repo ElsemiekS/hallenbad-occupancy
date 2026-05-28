@@ -198,14 +198,17 @@ def predict_fallback(training: pd.DataFrame, fc_weather: pd.DataFrame) -> pd.Ser
 
     def features(index: pd.DatetimeIndex, temp, rain) -> pd.DataFrame:
         local = index.tz_convert("Europe/Zurich")
-        return pd.DataFrame({
-            "h_sin": np.sin(2 * np.pi * local.hour / 24),
-            "h_cos": np.cos(2 * np.pi * local.hour / 24),
-            "d_sin": np.sin(2 * np.pi * local.dayofweek / 7),
-            "d_cos": np.cos(2 * np.pi * local.dayofweek / 7),
-            "temp":  np.asarray(temp),
-            "rain":  np.asarray(rain),
-        }, index=index)
+        df = pd.DataFrame(index=index)
+        # One-hot encode each hour so Ridge can learn the actual per-hour shape
+        # (e.g. the 08:00 morning peak) instead of being constrained to a
+        # smooth sinusoid that sin/cos encoding forces.
+        for h in range(24):
+            df[f"h_{h}"] = (local.hour == h).astype(float)
+        for d in range(7):
+            df[f"d_{d}"] = (local.dayofweek == d).astype(float)
+        df["temp"] = np.asarray(temp)
+        df["rain"] = np.asarray(rain)
+        return df
 
     X_train = features(
         training.index,
@@ -239,19 +242,20 @@ def zero_closed_hours(preds: pd.Series) -> pd.Series:
 
 # ── persistence ───────────────────────────────────────────────────────────────
 
-def store_predictions(client, preds: pd.Series) -> None:
+def store_predictions(client, preds: pd.Series, model_name: str) -> None:
     now_iso = datetime.now(timezone.utc).isoformat()
     rows = [
         {
             "pool_id": POOL_ID,
             "forecast_at": ts.isoformat(),
             "people_count_pred": int(val),
+            "model_name": model_name,
             "generated_at": now_iso,
         }
         for ts, val in preds.items()
     ]
     client.table("predictions").upsert(rows, on_conflict="pool_id,forecast_at").execute()
-    log.info("Stored %d predictions", len(rows))
+    log.info("Stored %d predictions (model: %s)", len(rows), model_name)
 
 
 # ── entrypoint ────────────────────────────────────────────────────────────────
@@ -287,10 +291,12 @@ def main() -> None:
 
     try:
         preds = predict_darts(training, fc_window)
+        model_name = "LinearRegressionModel"
         log.info("Darts model succeeded")
     except Exception as exc:
         log.warning("Darts failed (%s) — falling back to Ridge regression", exc)
         preds = predict_fallback(training, fc_window)
+        model_name = "ridge_fallback"
 
     # Zero out closed hours; trim to the 7-day window
     preds = zero_closed_hours(preds)
@@ -298,7 +304,7 @@ def main() -> None:
     log.info("%d predictions ready (%d non-zero open hours)", len(preds), int((preds > 0).sum()))
 
     # ── store ─────────────────────────────────────────────────────────────────
-    store_predictions(client, preds)
+    store_predictions(client, preds, model_name)
     log.info("Done.")
 
 
