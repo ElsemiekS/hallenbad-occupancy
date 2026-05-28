@@ -1,20 +1,18 @@
 import { useEffect, useState } from "react";
-import { subHours, subDays, subMonths } from "date-fns";
+import { subHours, subDays, subMonths, startOfDay, endOfDay } from "date-fns";
 import { supabase, isConfigured } from "./supabase.js";
 import { OccupancyChart } from "./components/OccupancyChart.jsx";
 import { HourlyAverages } from "./components/HourlyAverages.jsx";
+import { DateRangePicker } from "./components/DateRangePicker.jsx";
 
 // --- Demo data (used when Supabase is not yet configured) ---------------
 function generateDemoData() {
   const rows = [];
   const now = Date.now();
-  // Simulate 7 days of readings every 5 minutes
   for (let i = 7 * 24 * 60; i >= 0; i -= 5) {
     const ts = new Date(now - i * 60 * 1000);
     const hour = ts.getHours();
-    // Pool is "closed" between midnight and 6am
     if (hour < 6 || hour >= 23) continue;
-    // Bell-curve occupancy pattern peaking at noon and 6pm
     const base = 80 + 100 * Math.exp(-0.04 * (hour - 12) ** 2)
                     + 60 * Math.exp(-0.1 * (hour - 18) ** 2);
     const noise = (Math.random() - 0.5) * 30;
@@ -32,30 +30,33 @@ const RANGES = [
   { label: "All time", key: "all",   from: () => new Date(0) },
 ];
 
-// Bucket sizes for each range — longer views get aggregated so the chart stays readable
-// and each bucket of time always takes the same horizontal space.
 const BUCKET_MS = {
-  "24h":   5  * 60 * 1000,        // keep raw ~5-min readings
-  "week":  60 * 60 * 1000,        // hourly averages
-  "month": 6  * 60 * 60 * 1000,   // 6-hour averages
-  "all":   24 * 60 * 60 * 1000,   // daily averages
+  "24h":   5  * 60 * 1000,
+  "week":  60 * 60 * 1000,
+  "month": 6  * 60 * 60 * 1000,
+  "all":   24 * 60 * 60 * 1000,
 };
 
-function aggregateForChart(data, range) {
-  const bucketMs = BUCKET_MS[range];
-  const buckets = new Map();
+// Pick a sensible bucket size for an arbitrary date range
+function autoBucketMs(from, to) {
+  const days = (to - from) / 86_400_000;
+  if (days <= 2)  return 5  * 60 * 1000;
+  if (days <= 14) return 60 * 60 * 1000;
+  if (days <= 60) return 6  * 60 * 60 * 1000;
+  return 24 * 60 * 60 * 1000;
+}
 
+function aggregateForChart(data, bucketMs) {
+  const buckets = new Map();
   for (const d of data) {
     if (d.people_count == null) continue;
     const ts = new Date(d.recorded_at).getTime();
-    // Snap to bucket start so each bucket has a deterministic timestamp
     const bucket = Math.floor(ts / bucketMs) * bucketMs;
     if (!buckets.has(bucket)) buckets.set(bucket, { sum: 0, n: 0 });
     const b = buckets.get(bucket);
     b.sum += d.people_count;
     b.n++;
   }
-
   return [...buckets.entries()]
     .sort(([a], [b]) => a - b)
     .map(([ts, { sum, n }]) => ({ ts, people_count: Math.round(sum / n) }));
@@ -63,9 +64,30 @@ function aggregateForChart(data, range) {
 
 export default function App() {
   const [range, setRange] = useState("week");
+  const [customRange, setCustomRange] = useState(null); // { from: Date, to: Date } or null
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Clicking a preset tab clears any custom range
+  function selectRange(key) {
+    setCustomRange(null);
+    setRange(key);
+  }
+
+  const activeFrom = customRange?.from ?? RANGES.find((r) => r.key === range).from();
+  const activeTo   = customRange?.to   ?? new Date();
+
+  // Bucket size for the current view
+  const bucketMs = customRange
+    ? autoBucketMs(activeFrom, activeTo)
+    : BUCKET_MS[range];
+
+  // Recharts range key hint for axis formatting (derived from bucket size)
+  const chartRange = bucketMs <= 5 * 60 * 1000   ? "24h"
+                   : bucketMs <= 60 * 60 * 1000   ? "week"
+                   : bucketMs <= 6 * 60 * 60 * 1000 ? "month"
+                   : "all";
 
   useEffect(() => {
     async function load() {
@@ -73,32 +95,31 @@ export default function App() {
       setError(null);
 
       if (!isConfigured) {
-        // Filter demo data to the selected range so tabs still work
-        const from = RANGES.find((r) => r.key === range).from();
-        setData(DEMO_DATA.filter((d) => new Date(d.recorded_at) >= from));
+        const filtered = DEMO_DATA.filter((d) => {
+          const t = new Date(d.recorded_at);
+          return t >= activeFrom && t <= activeTo;
+        });
+        setData(filtered);
         setLoading(false);
         return;
       }
 
-      const from = RANGES.find((r) => r.key === range).from();
       const { data: rows, error: err } = await supabase
         .from("occupancy")
         .select("recorded_at, people_count")
         .eq("pool_id", "hallenbad_city")
-        .gte("recorded_at", from.toISOString())
+        .gte("recorded_at", activeFrom.toISOString())
+        .lte("recorded_at", activeTo.toISOString())
         .order("recorded_at", { ascending: true })
-        // Cap at 5000 rows so the chart stays fast
         .limit(5000);
 
-      if (err) {
-        setError(err.message);
-      } else {
-        setData(rows ?? []);
-      }
+      if (err) setError(err.message);
+      else setData(rows ?? []);
       setLoading(false);
     }
     load();
-  }, [range]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, customRange]);
 
   const latest = data.at(-1);
   const current = latest?.people_count;
@@ -134,24 +155,28 @@ export default function App() {
         )}
       </section>
 
-      {/* Demo mode banner */}
       {!isConfigured && (
         <div className="demo-banner">
           Demo mode — connect Supabase to see real data (see README.md)
         </div>
       )}
 
-      {/* Time range selector */}
+      {/* Range selector: preset tabs + custom date picker */}
       <div className="range-tabs">
         {RANGES.map((r) => (
           <button
             key={r.key}
-            className={`range-tab ${range === r.key ? "active" : ""}`}
-            onClick={() => setRange(r.key)}
+            className={`range-tab ${!customRange && range === r.key ? "active" : ""}`}
+            onClick={() => selectRange(r.key)}
           >
             {r.label}
           </button>
         ))}
+        <DateRangePicker
+          value={customRange}
+          onChange={setCustomRange}
+          onClear={() => setCustomRange(null)}
+        />
       </div>
 
       {/* Time series chart */}
@@ -162,17 +187,15 @@ export default function App() {
         ) : loading ? (
           <div className="chart-loading">Loading…</div>
         ) : (
-          <OccupancyChart data={aggregateForChart(data, range)} range={range} />
+          <OccupancyChart data={aggregateForChart(data, bucketMs)} range={chartRange} />
         )}
       </section>
 
-      {/* Hourly averages (only meaningful with enough data) */}
       {!loading && data.length > 20 && <HourlyAverages data={data} />}
     </div>
   );
 }
 
-// Simple horizontal gauge bar
 function Gauge({ value, max }) {
   const pct = Math.min(100, Math.round((value / max) * 100));
   const color = pct < 40 ? "#22c55e" : pct < 70 ? "#f59e0b" : "#ef4444";

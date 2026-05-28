@@ -94,6 +94,69 @@ body {
 .tooltip-time  { color: #9ca3af; margin-bottom: 2px; }
 .tooltip-count { font-weight: 600; }
 
+/* ── Date range picker ───────────────────────────── */
+.rdp-wrapper {
+  position: relative;
+}
+
+.rdp-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 100;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.12);
+  padding: 12px 12px 8px;
+  min-width: 280px;
+}
+
+/* Keep the popover on-screen on small displays */
+@media (max-width: 500px) {
+  .rdp-popover { left: auto; right: 0; }
+}
+
+.rdp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 4px 4px;
+  border-top: 1px solid #f3f4f6;
+  margin-top: 4px;
+}
+
+.rdp-btn-clear {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: #6b7280;
+}
+.rdp-btn-clear:hover { background: #f9fafb; }
+
+.rdp-btn-apply {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.rdp-btn-apply:disabled { background: #93c5fd; cursor: not-allowed; }
+.rdp-btn-apply:not(:disabled):hover { background: #1d4ed8; }
+
+/* Theme react-day-picker to match our blue */
+.rdp-root {
+  --rdp-accent-color: #2563eb;
+  --rdp-accent-background-color: #eff6ff;
+  font-size: 0.875rem;
+}
+
 /* ── Demo banner ─────────────────────────────────── */
 .demo-banner {
   background: #fef9c3;
