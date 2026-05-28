@@ -9,7 +9,8 @@ import {
   Cell,
 } from "recharts";
 
-function barColor(avg, max) {
+function barColor(avg, max, closed) {
+  if (closed) return "#e5e7eb"; // pool closed — neutral grey
   const ratio = max > 0 ? avg / max : 0;
   if (ratio < 0.4) return "#22c55e";
   if (ratio < 0.7) return "#f59e0b";
@@ -18,10 +19,13 @@ function barColor(avg, max) {
 
 function CustomTooltip({ active, payload }) {
   if (!active || !payload?.length) return null;
+  const { label, closed } = payload[0].payload;
   return (
     <div className="tooltip">
-      <div className="tooltip-time">{payload[0].payload.label}</div>
-      <div className="tooltip-count">avg {payload[0].value} people</div>
+      <div className="tooltip-time">{label}</div>
+      <div className="tooltip-count">
+        {closed ? "Pool closed" : `avg ${payload[0].value} people`}
+      </div>
     </div>
   );
 }
@@ -30,9 +34,12 @@ function CustomTooltip({ active, payload }) {
 export function HourlyAverages({ data }) {
   if (!data?.length) return null;
 
-  const chartData = data.map((d) => ({
-    label: `${String(d.hour).padStart(2, "0")}:00`,
-    avg: d.avg_people,
+  // Show all 24 hours; closed hours (outside 06:00–22:00) always show 0
+  const byHour = Object.fromEntries(data.map((d) => [d.hour, d.avg_people]));
+  const chartData = Array.from({ length: 24 }, (_, h) => ({
+    label: `${String(h).padStart(2, "0")}:00`,
+    avg: h >= 6 && h < 22 ? (byHour[h] ?? 0) : 0,
+    closed: h < 6 || h >= 22,
   }));
 
   const max = Math.max(...chartData.map((d) => d.avg));
@@ -49,7 +56,7 @@ export function HourlyAverages({ data }) {
           <Tooltip content={<CustomTooltip />} cursor={{ fill: "#f3f4f6" }} />
           <Bar dataKey="avg" radius={[4, 4, 0, 0]}>
             {chartData.map((entry) => (
-              <Cell key={entry.label} fill={barColor(entry.avg, max)} />
+              <Cell key={entry.label} fill={barColor(entry.avg, max, entry.closed)} />
             ))}
           </Bar>
         </BarChart>

@@ -226,11 +226,15 @@ def predict_fallback(training: pd.DataFrame, fc_weather: pd.DataFrame) -> pd.Ser
     return preds.clip(0, 450).round().astype(int)
 
 
-def keep_open_hours(preds: pd.Series) -> pd.Series:
-    """Drop predictions outside pool opening hours (06:00–22:00 Zürich)."""
+def zero_closed_hours(preds: pd.Series) -> pd.Series:
+    """Set predictions to 0 outside pool opening hours (06:00–22:00 Zürich).
+
+    Closed hours are stored as 0 (not dropped) so the forecast chart shows a
+    flat zero line at night rather than gaps.
+    """
     local = preds.index.tz_convert("Europe/Zurich")
     mask = (local.hour >= OPEN_START) & (local.hour < OPEN_END)
-    return preds[mask]
+    return preds.where(mask, other=0)
 
 
 # ── persistence ───────────────────────────────────────────────────────────────
@@ -288,10 +292,10 @@ def main() -> None:
         log.warning("Darts failed (%s) — falling back to Ridge regression", exc)
         preds = predict_fallback(training, fc_window)
 
-    # Restrict to pool open hours and the 7-day window
-    preds = keep_open_hours(preds)
+    # Zero out closed hours; trim to the 7-day window
+    preds = zero_closed_hours(preds)
     preds = preds[preds.index <= now_utc + timedelta(hours=HORIZON_HOURS)]
-    log.info("%d open-hour predictions ready", len(preds))
+    log.info("%d predictions ready (%d non-zero open hours)", len(preds), int((preds > 0).sum()))
 
     # ── store ─────────────────────────────────────────────────────────────────
     store_predictions(client, preds)

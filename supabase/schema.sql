@@ -35,6 +35,7 @@ AS $$
     AND recorded_at >= p_from
     AND recorded_at <= p_to
     AND occupancy.people_count IS NOT NULL
+    AND EXTRACT(HOUR FROM recorded_at AT TIME ZONE 'Europe/Zurich') BETWEEN 6 AND 21
   GROUP BY 1
   ORDER BY 1;
 $$;
@@ -71,6 +72,7 @@ AS $$
     AND recorded_at >= p_from
     AND recorded_at <= p_to
     AND people_count IS NOT NULL
+    AND EXTRACT(HOUR FROM recorded_at AT TIME ZONE 'Europe/Zurich') BETWEEN 6 AND 21
   GROUP BY 1
   ORDER BY 1;
 $$;
