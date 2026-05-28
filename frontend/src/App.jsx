@@ -62,10 +62,24 @@ function aggregateForChart(data, bucketMs) {
     .map(([ts, { sum, n }]) => ({ ts, people_count: Math.round(sum / n) }));
 }
 
+// Compute hour-of-day averages from demo data (used when Supabase is not configured)
+function demoHourlyAverages() {
+  const buckets = Array.from({ length: 24 }, (_, h) => ({ hour: h, sum: 0, n: 0 }));
+  for (const d of DEMO_DATA) {
+    if (d.people_count == null) continue;
+    buckets[new Date(d.recorded_at).getHours()].sum += d.people_count;
+    buckets[new Date(d.recorded_at).getHours()].n += 1;
+  }
+  return buckets
+    .filter((b) => b.n > 0)
+    .map((b) => ({ hour: b.hour, avg_people: Math.round(b.sum / b.n) }));
+}
+
 export default function App() {
   const [range, setRange] = useState("week");
   const [customRange, setCustomRange] = useState(null); // { from: Date, to: Date } or null
   const [data, setData] = useState([]);
+  const [hourlyAvgs, setHourlyAvgs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -127,6 +141,25 @@ export default function App() {
       setLoading(false);
     }
     load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, customRange]);
+
+  // Separate fetch for the "average by hour of day" chart.
+  // Runs whenever the time window changes so it reflects the selected period.
+  useEffect(() => {
+    async function loadHourly() {
+      if (!isConfigured) {
+        setHourlyAvgs(demoHourlyAverages());
+        return;
+      }
+      const { data: rows } = await supabase.rpc("get_hourly_averages", {
+        p_pool_id: "hallenbad_city",
+        p_from: activeFrom.toISOString(),
+        p_to: activeTo.toISOString(),
+      });
+      setHourlyAvgs(rows ?? []);
+    }
+    loadHourly();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, customRange]);
 
@@ -200,7 +233,7 @@ export default function App() {
         )}
       </section>
 
-      {!loading && data.length > 20 && <HourlyAverages data={data} />}
+      {hourlyAvgs.length > 0 && <HourlyAverages data={hourlyAvgs} />}
     </div>
   );
 }
