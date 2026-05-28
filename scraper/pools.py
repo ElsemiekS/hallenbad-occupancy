@@ -51,7 +51,7 @@ POOLS: list[PoolConfig] = [
     PoolConfig(
         pool_id="unterer_letten",
         url="https://www.stadt-zuerich.ch/de/stadtleben/sport-und-erholung/sport-und-badeanlagen/sommerbaeder/unterer-letten.html",
-        element_id="flb8803_visitornumber",
+        element_id="flb6940_visitornumber",
         open_start=9,
         open_end=21,
         label="Flussbad Unterer Letten",
