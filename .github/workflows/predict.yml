@@ -1,11 +1,8 @@
 name: Generate Occupancy Predictions
 
 on:
-  # Run once per day at 05:00 Zürich time (04:00 UTC in winter / 03:00 in summer).
-  # This is before the pool opens, so the forecast is ready when visitors check.
-  schedule:
-    - cron: "0 4 * * *"
-  # Allow triggering manually from the Actions tab while the model is being tuned.
+  # Triggered externally at 05:00 Zürich time by cron-job.org via workflow_dispatch.
+  # GitHub's built-in schedule is unreliable — cron-job.org fires on time.
   workflow_dispatch:
 
 jobs:
