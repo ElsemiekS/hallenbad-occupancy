@@ -36,7 +36,7 @@ POOLS: list[PoolConfig] = [
         pool_id="enge",
         url="https://www.stadt-zuerich.ch/de/stadtleben/sport-und-erholung/sport-und-badeanlagen/sommerbaeder/enge.html",
         element_id="BADI-1_visitornumber",
-        open_start=9,
+        open_start=8,
         open_end=20,
         label="Seebad Enge",
     ),

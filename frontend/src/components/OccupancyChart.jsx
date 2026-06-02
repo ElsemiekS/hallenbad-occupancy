@@ -31,7 +31,6 @@ function DayTick({ x, y, payload, weather }) {
   );
 }
 
-
 function formatTooltipTime(ts, range) {
   if (range === "24h")   return format(new Date(ts), "HH:mm");
   if (range === "week")  return format(new Date(ts), "EEE d MMM, HH:mm");
@@ -78,40 +77,21 @@ export function OccupancyChart({ series, range, weather }) {
     }
   }
 
-  // Inject explicit 0 points 5 min before open and 5 min after close per pool
-  // per day so the line cleanly drops to 0 at closing (rather than connecting
-  // the last real reading across the night to the next day).
-  // The ±5 min offset avoids colliding with real data at the exact open/close
-  // bucket. The BUFFER guard prevents injecting zeros that fall outside the
-  // actual data range (which would extend the 24h chart back to opening time).
-  if (byTs.size > 0) {
-    const keys = [...byTs.keys()];
-    const minTs = Math.min(...keys);
-    const maxTs = Math.max(...keys);
-    // 1-hour buffer: covers delayed scraper runs (opening zero skipped if
-    // first reading is >20 min late with a 15-min buffer).
-    // Still prevents injecting yesterday's opening zero into a 24h chart
-    // that starts mid-afternoon (those are hours before minTs).
-    const BUFFER = 60 * 60000;
-
-    let day = startOfDay(new Date(minTs));
-    const endDay = startOfDay(new Date(maxTs));
-    while (day <= endDay) {
-      for (const { pool } of series) {
-        if (pool.openStart == null || pool.openEnd == null) continue;
-        const dayMs = day.getTime();
-        for (const ts of [
-          dayMs + pool.openStart * 3600000 - 5 * 60000,  // 5 min before open → 0
-          dayMs + pool.openEnd   * 3600000 + 5 * 60000,  // 5 min after close → 0
-        ]) {
-          if (ts < minTs - BUFFER || ts > maxTs + BUFFER) continue;
-          if (!byTs.has(ts)) byTs.set(ts, { ts });
-          // Always force 0 — overrides stray readings at close+5min
-          // (people still leaving) and ensures open-5min is always zero.
-          byTs.get(ts)[pool.id] = 0;
-        }
+  // For every timestamp already in the map, force each pool's value to 0
+  // when that pool is officially closed (hour outside its open window).
+  // This handles three cases in one pass:
+  //   - stray real readings after closing time (people still leaving)
+  //   - early readings before opening (e.g. Ob. Letten at 08:50)
+  //   - multi-pool gaps: timestamps from pool A during pool B's closed
+  //     hours are filled with 0 so pool B's line is flat rather than
+  //     floating/breaking in mid-air
+  for (const [ts, row] of byTs) {
+    const h = new Date(ts).getHours();
+    for (const { pool } of series) {
+      if (pool.openStart == null || pool.openEnd == null) continue;
+      if (h < pool.openStart || h >= pool.openEnd) {
+        row[pool.id] = 0;
       }
-      day = addDays(day, 1);
     }
   }
 
@@ -119,15 +99,24 @@ export function OccupancyChart({ series, range, weather }) {
   const firstDayMidnight = startOfDay(new Date(chartData[0].ts));
   const lastTs = chartData[chartData.length - 1].ts;
 
-  // Build midnight and noon tick arrays for day-separator views
+  // Midnight separators and noon label ticks (week + month views)
   const midnightTicks = [];
   for (let d = firstDayMidnight; d.getTime() <= lastTs; d = addDays(d, 1)) {
     midnightTicks.push(d.getTime());
   }
   const noonTicks = midnightTicks.map((ts) => ts + 12 * 3600000);
-  // Month view: label every 7th day to avoid crowding
-  const monthNoonTicks = noonTicks.filter((_, i) => i % 7 === 0);
+  // Month: show ~5 evenly-spaced labels regardless of how many days of data exist
+  const monthInterval = Math.max(1, Math.floor(noonTicks.length / 5));
 
+  // 24h: ticks at every hour — labels every 2 hours, grid lines every hour
+  const hourlyTicks = [];
+  if (range === "24h") {
+    for (let t = firstDayMidnight.getTime(); t <= lastTs + 3600000; t += 3600000) {
+      hourlyTicks.push(t);
+    }
+  }
+
+  const is24h  = range === "24h";
   const isWeek  = range === "week";
   const isMonth = range === "month";
   const hasSeparators = isWeek || isMonth;
@@ -136,7 +125,7 @@ export function OccupancyChart({ series, range, weather }) {
     <ResponsiveContainer width="100%" height={isWeek ? 340 : 320}>
       <LineChart
         data={chartData}
-        margin={{ top: 8, right: 24, bottom: isWeek ? 58 : isMonth ? 24 : 0, left: 0 }}
+        margin={{ top: 8, right: 24, bottom: isWeek ? 58 : isMonth ? 24 : 4, left: 0 }}
       >
         <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
         <XAxis
@@ -144,19 +133,30 @@ export function OccupancyChart({ series, range, weather }) {
           type="number"
           scale="time"
           domain={hasSeparators ? [firstDayMidnight.getTime(), "dataMax"] : ["dataMin", "dataMax"]}
-          ticks={isWeek ? noonTicks : isMonth ? monthNoonTicks : undefined}
+          ticks={
+            is24h   ? hourlyTicks :
+            isWeek  ? noonTicks :
+            isMonth ? noonTicks :
+            undefined
+          }
           tick={
             isWeek ? (props) => <DayTick {...props} weather={weather} />
                    : { fontSize: 11, fill: "#6b7280" }
           }
           tickFormatter={
+            is24h   ? (v) => { const h = new Date(v).getHours(); return h % 2 === 0 ? format(new Date(v), "HH:mm") : ""; } :
             isMonth ? (v) => format(new Date(v), "d MMM") :
-            !hasSeparators ? (v) => format(new Date(v), range === "24h" ? "HH:mm" : "MMM ''yy") :
+            !isWeek ? (v) => format(new Date(v), "MMM ''yy") :
             undefined
           }
-          tickLine={!hasSeparators}
-          minTickGap={hasSeparators ? 0 : 60}
-          interval={hasSeparators ? 0 : "preserveStartEnd"}
+          tickLine={false}
+          minTickGap={0}
+          interval={
+            is24h   ? 0 :
+            isWeek  ? 0 :
+            isMonth ? monthInterval :
+            "preserveStartEnd"
+          }
         />
         <YAxis
           domain={[0, "auto"]}
