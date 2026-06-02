@@ -56,4 +56,12 @@ POOLS: list[PoolConfig] = [
         open_end=21,
         label="Flussbad Unterer Letten",
     ),
+    PoolConfig(
+        pool_id="utoquai",
+        url="https://www.stadt-zuerich.ch/de/stadtleben/sport-und-erholung/sport-und-badeanlagen/sommerbaeder/utoquai.html",
+        element_id="SSD-10_visitornumber",
+        open_start=9,
+        open_end=20,
+        label="Seebad Utoquai",
+    ),
 ]

@@ -1,10 +1,7 @@
 import {
-  BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
 } from "recharts";
-
-// ── single-pool bar chart (existing behaviour) ────────────────────────────────
 
 function barColor(avg, max, closed) {
   if (closed) return "#e5e7eb";
@@ -27,23 +24,24 @@ function SingleTooltip({ active, payload }) {
   );
 }
 
-function SinglePoolBars({ data }) {
+// Shared bar chart — used for both single-pool (full width) and small multiples (half width)
+function PoolBars({ data, openStart = 6, openEnd = 22, height = 220, interval = 1 }) {
   const byHour = Object.fromEntries(data.map((d) => [d.hour, d.avg_people]));
   const chartData = Array.from({ length: 24 }, (_, h) => ({
     label: `${String(h).padStart(2, "0")}:00`,
-    avg: h >= 6 && h < 22 ? (byHour[h] ?? 0) : 0,
-    closed: h < 6 || h >= 22,
+    avg: h >= openStart && h < openEnd ? (byHour[h] ?? 0) : 0,
+    closed: h < openStart || h >= openEnd,
   }));
   const max = Math.max(...chartData.map((d) => d.avg));
 
   return (
-    <ResponsiveContainer width="100%" height={220}>
-      <BarChart data={chartData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
-        <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#6b7280" }} interval={1} />
-        <YAxis tick={{ fontSize: 11, fill: "#6b7280" }} width={36} />
+        <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#6b7280" }} interval={interval} />
+        <YAxis tick={{ fontSize: 10, fill: "#6b7280" }} width={30} />
         <Tooltip content={<SingleTooltip />} cursor={{ fill: "#f3f4f6" }} />
-        <Bar dataKey="avg" radius={[4, 4, 0, 0]}>
+        <Bar dataKey="avg" radius={[3, 3, 0, 0]}>
           {chartData.map((entry) => (
             <Cell key={entry.label} fill={barColor(entry.avg, max, entry.closed)} />
           ))}
@@ -53,66 +51,30 @@ function SinglePoolBars({ data }) {
   );
 }
 
-// ── multi-pool line chart ─────────────────────────────────────────────────────
-
-function MultiTooltip({ active, payload, series }) {
-  if (!active || !payload?.length) return null;
-  const hour = payload[0]?.payload?.hour;
+// Multi-pool: one bar chart per pool in a 2-column grid
+function SmallMultiples({ series }) {
   return (
-    <div className="tooltip">
-      <div className="tooltip-time">{String(hour).padStart(2, "0")}:00</div>
-      {series.map(({ pool }) => {
-        const entry = payload.find((p) => p.dataKey === pool.id);
-        if (!entry) return null;
-        return (
-          <div key={pool.id} className="tooltip-pool-row">
-            <span className="tooltip-pool-dot" style={{ background: pool.color }} />
-            <span>{pool.short}:</span>
-            <span className="tooltip-count">avg {entry.value} people</span>
+    <div className="hourly-grid">
+      {series.map(({ pool, data }) => (
+        <div key={pool.id} className="hourly-grid-item">
+          <div className="hourly-grid-header">
+            <span className="hourly-grid-dot" style={{ background: pool.color }} />
+            <span className="hourly-grid-label">{pool.short}</span>
           </div>
-        );
-      })}
+          <PoolBars
+            data={data}
+            openStart={pool.openStart}
+            openEnd={pool.openEnd}
+            height={170}
+            interval={3}
+          />
+        </div>
+      ))}
     </div>
   );
 }
 
-function MultiPoolLines({ series }) {
-  // Build one row per hour with a column per pool
-  const chartData = Array.from({ length: 24 }, (_, h) => {
-    const row = { hour: h, label: `${String(h).padStart(2, "0")}:00` };
-    for (const { pool, data } of series) {
-      const found = data.find((d) => d.hour === h);
-      row[pool.id] = found ? found.avg_people : 0;
-    }
-    return row;
-  });
-
-  return (
-    <ResponsiveContainer width="100%" height={220}>
-      <LineChart data={chartData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
-        <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#6b7280" }} interval={1} />
-        <YAxis tick={{ fontSize: 11, fill: "#6b7280" }} width={36} />
-        <Tooltip content={<MultiTooltip series={series} />} />
-        {series.map(({ pool }) => (
-          <Line
-            key={pool.id}
-            type="monotone"
-            dataKey={pool.id}
-            stroke={pool.color}
-            strokeWidth={2}
-            dot={false}
-            activeDot={{ r: 3 }}
-          />
-        ))}
-      </LineChart>
-    </ResponsiveContainer>
-  );
-}
-
-// ── public component ──────────────────────────────────────────────────────────
-
-// series: [{ pool: { id, label, color, short }, data: [{ hour, avg_people }] }]
+// series: [{ pool: { id, label, color, short, openStart, openEnd }, data: [{ hour, avg_people }] }]
 export function HourlyAverages({ series }) {
   if (!series?.length || series.every((s) => !s.data?.length)) return null;
 
@@ -120,9 +82,17 @@ export function HourlyAverages({ series }) {
     <section className="card">
       <h2 className="card-title">Average by hour of day</h2>
       <p className="card-subtitle">Best time to go: quieter = fewer people (Zürich local time)</p>
-      {series.length === 1
-        ? <SinglePoolBars data={series[0].data} />
-        : <MultiPoolLines series={series} />}
+      {series.length === 1 ? (
+        <PoolBars
+          data={series[0].data}
+          openStart={series[0].pool.openStart}
+          openEnd={series[0].pool.openEnd}
+          height={220}
+          interval={1}
+        />
+      ) : (
+        <SmallMultiples series={series} />
+      )}
     </section>
   );
 }

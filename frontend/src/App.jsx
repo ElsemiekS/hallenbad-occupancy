@@ -46,15 +46,14 @@ const RANGES = [
 const BUCKET_MS = {
   "24h":   5  * 60 * 1000,
   "week":  60 * 60 * 1000,
-  "month": 6  * 60 * 60 * 1000,
+  "month": 60 * 60 * 1000,   // hourly buckets for 30-day view
   "all":   24 * 60 * 60 * 1000,
 };
 
 function autoBucketMs(from, to) {
   const days = (to - from) / 86_400_000;
   if (days <= 2)  return 5  * 60 * 1000;
-  if (days <= 14) return 60 * 60 * 1000;
-  if (days <= 60) return 6  * 60 * 60 * 1000;
+  if (days <= 60) return 60 * 60 * 1000;
   return 24 * 60 * 60 * 1000;
 }
 
@@ -97,9 +96,11 @@ export default function App() {
   const activeFrom = customRange?.from ?? RANGES.find((r) => r.key === range).from();
   const activeTo   = customRange?.to   ?? new Date();
   const bucketMs   = customRange ? autoBucketMs(activeFrom, activeTo) : BUCKET_MS[range];
-  const chartRange = bucketMs <= 5 * 60 * 1000      ? "24h"
-                   : bucketMs <= 60 * 60 * 1000     ? "week"
-                   : bucketMs <= 6 * 60 * 60 * 1000 ? "month" : "all";
+  const spanDays   = (activeTo - activeFrom) / 86_400_000;
+  const chartRange = spanDays <= 2  ? "24h"
+                   : spanDays <= 10 ? "week"
+                   : spanDays <= 60 ? "month"
+                   : "all";
 
   // ── time-series chart data ────────────────────────────────────────────────
   useEffect(() => {
@@ -214,13 +215,13 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPools.join(",")]);
 
-  // ── daily weather for forecast strip ─────────────────────────────────────
+  // ── daily weather for both occupancy (past 7d) and forecast (future 7d) ──
   useEffect(() => {
     fetch(
       "https://api.open-meteo.com/v1/forecast" +
       "?latitude=47.3769&longitude=8.5417" +
       "&daily=temperature_2m_max,precipitation_sum" +
-      "&timezone=Europe%2FZurich&forecast_days=8"
+      "&timezone=Europe%2FZurich&past_days=7&forecast_days=8"
     )
       .then((r) => r.json())
       .then((data) => {
@@ -229,7 +230,7 @@ export default function App() {
           maxTemp: Math.round(data.daily.temperature_2m_max[i]),
           precip: data.daily.precipitation_sum[i] ?? 0,
         }));
-        setDailyWeather(days.slice(0, 7));
+        setDailyWeather(days); // covers past 7 days + today + 7 future days
       })
       .catch(() => {});
   }, []);
@@ -311,7 +312,7 @@ export default function App() {
         ) : loading ? (
           <div className="chart-loading">Loading…</div>
         ) : (
-          <OccupancyChart series={chartSeries} range={chartRange} />
+          <OccupancyChart series={chartSeries} range={chartRange} weather={dailyWeather} />
         )}
       </section>
 

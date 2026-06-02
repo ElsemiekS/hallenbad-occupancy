@@ -260,6 +260,33 @@ body {
 }
 .error { color: #ef4444; }
 
+/* ── Hourly averages small multiples ─────────────────────────────────────── */
+.hourly-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px 12px;
+}
+@media (max-width: 500px) {
+  .hourly-grid { grid-template-columns: 1fr; }
+}
+.hourly-grid-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.hourly-grid-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.hourly-grid-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #374151;
+}
+
 .spinner {
   width: 32px;
   height: 32px;
