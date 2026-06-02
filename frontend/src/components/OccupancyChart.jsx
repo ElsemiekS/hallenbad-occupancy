@@ -136,10 +136,17 @@ export function OccupancyChart({ series, range, weather }) {
   // Month: show ~5 evenly-spaced labels regardless of how many days of data exist
   const monthInterval = Math.max(1, Math.floor(noonTicks.length / 5));
 
-  // 24h: ticks at every hour — labels every 2 hours, grid lines every hour
+  // Extend domain to the next midnight so every day column is equal width.
+  // Without this the last column (today) is only as wide as the hours elapsed
+  // today, making separator lines appear unevenly spaced.
+  const nextMidnight = addDays(startOfDay(new Date(lastTs)), 1);
+
+  // 24h: ticks at every hour starting from the first data hour (not midnight).
+  // Starting from midnight caused Recharts to extend the domain back to 00:00.
   const hourlyTicks = [];
   if (range === "24h") {
-    for (let t = firstDayMidnight.getTime(); t <= lastTs + 3600000; t += 3600000) {
+    const firstHour = Math.floor(chartData[0].ts / 3600000) * 3600000;
+    for (let t = firstHour; t <= lastTs + 3600000; t += 3600000) {
       hourlyTicks.push(t);
     }
   }
@@ -160,7 +167,11 @@ export function OccupancyChart({ series, range, weather }) {
           dataKey="ts"
           type="number"
           scale="time"
-          domain={hasSeparators ? [firstDayMidnight.getTime(), "dataMax"] : ["dataMin", "dataMax"]}
+          domain={
+            hasSeparators ? [firstDayMidnight.getTime(), nextMidnight.getTime()] :
+            is24h && hourlyTicks.length ? [hourlyTicks[0], "dataMax"] :
+            ["dataMin", "dataMax"]
+          }
           ticks={
             is24h   ? hourlyTicks :
             isWeek  ? noonTicks :
