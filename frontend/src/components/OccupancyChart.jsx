@@ -31,16 +31,6 @@ function DayTick({ x, y, payload, weather }) {
   );
 }
 
-// Month view: date label at every-7-day noon ticks
-function MonthTick({ x, y, payload }) {
-  return (
-    <g transform={`translate(${x},${y})`}>
-      <text textAnchor="middle" y={14} fontSize={11} fill="#6b7280">
-        {format(new Date(payload.value), "d MMM")}
-      </text>
-    </g>
-  );
-}
 
 function formatTooltipTime(ts, range) {
   if (range === "24h")   return format(new Date(ts), "HH:mm");
@@ -151,12 +141,13 @@ export function OccupancyChart({ series, range, weather }) {
           domain={hasSeparators ? [firstDayMidnight.getTime(), "dataMax"] : ["dataMin", "dataMax"]}
           ticks={isWeek ? noonTicks : isMonth ? monthNoonTicks : undefined}
           tick={
-            isWeek  ? (props) => <DayTick {...props} weather={weather} /> :
-            isMonth ? (props) => <MonthTick {...props} />                  :
-            { fontSize: 12, fill: "#6b7280" }
+            isWeek ? (props) => <DayTick {...props} weather={weather} />
+                   : { fontSize: 11, fill: "#6b7280" }
           }
-          tickFormatter={hasSeparators ? undefined : (v) =>
-            format(new Date(v), range === "24h" ? "HH:mm" : "MMM ''yy")
+          tickFormatter={
+            isMonth ? (v) => format(new Date(v), "d MMM") :
+            !hasSeparators ? (v) => format(new Date(v), range === "24h" ? "HH:mm" : "MMM ''yy") :
+            undefined
           }
           tickLine={!hasSeparators}
           minTickGap={hasSeparators ? 0 : 60}
