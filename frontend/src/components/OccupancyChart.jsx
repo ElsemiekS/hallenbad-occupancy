@@ -88,7 +88,11 @@ export function OccupancyChart({ series, range, weather }) {
     const keys = [...byTs.keys()];
     const minTs = Math.min(...keys);
     const maxTs = Math.max(...keys);
-    const BUFFER = 15 * 60000; // 15-minute tolerance around the data range
+    // 1-hour buffer: covers delayed scraper runs (opening zero skipped if
+    // first reading is >20 min late with a 15-min buffer).
+    // Still prevents injecting yesterday's opening zero into a 24h chart
+    // that starts mid-afternoon (those are hours before minTs).
+    const BUFFER = 60 * 60000;
 
     let day = startOfDay(new Date(minTs));
     const endDay = startOfDay(new Date(maxTs));
@@ -102,8 +106,9 @@ export function OccupancyChart({ series, range, weather }) {
         ]) {
           if (ts < minTs - BUFFER || ts > maxTs + BUFFER) continue;
           if (!byTs.has(ts)) byTs.set(ts, { ts });
-          const row = byTs.get(ts);
-          if (row[pool.id] == null) row[pool.id] = 0;
+          // Always force 0 — overrides stray readings at close+5min
+          // (people still leaving) and ensures open-5min is always zero.
+          byTs.get(ts)[pool.id] = 0;
         }
       }
       day = addDays(day, 1);
