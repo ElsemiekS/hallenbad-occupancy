@@ -77,14 +77,42 @@ export function OccupancyChart({ series, range, weather }) {
     }
   }
 
-  // For every timestamp already in the map, force each pool's value to 0
-  // when that pool is officially closed (hour outside its open window).
-  // This handles three cases in one pass:
-  //   - stray real readings after closing time (people still leaving)
-  //   - early readings before opening (e.g. Ob. Letten at 08:50)
-  //   - multi-pool gaps: timestamps from pool A during pool B's closed
-  //     hours are filled with 0 so pool B's line is flat rather than
-  //     floating/breaking in mid-air
+  // ── Step 1: inject explicit open/close anchor timestamps ────────────────
+  // The forced-0 pass below can only zero timestamps that already exist in
+  // byTs. The pool with the longest open hours (e.g. Hallenbad 06–22) has
+  // no data overnight — no other pool provides timestamps during that gap —
+  // so without explicit anchors, its line connects last-reading → first-
+  // morning-reading diagonally. Injecting a 0 at openEnd and openStart
+  // per day per pool ensures those boundary points exist.
+  if (byTs.size > 0) {
+    const keys = [...byTs.keys()];
+    const minTs = Math.min(...keys);
+    const maxTs = Math.max(...keys);
+    const BUFFER = 60 * 60000; // 1 h — prevents extending a 24h chart backward
+
+    let day = startOfDay(new Date(minTs));
+    const endDay = startOfDay(new Date(maxTs));
+    while (day <= endDay) {
+      for (const { pool } of series) {
+        if (pool.openStart == null || pool.openEnd == null) continue;
+        const dayMs = day.getTime();
+        for (const ts of [
+          dayMs + pool.openStart * 3600000, // open anchor
+          dayMs + pool.openEnd   * 3600000, // close anchor
+        ]) {
+          if (ts < minTs - BUFFER || ts > maxTs + BUFFER) continue;
+          if (!byTs.has(ts)) byTs.set(ts, { ts });
+          byTs.get(ts)[pool.id] = 0; // always 0 at the boundary
+        }
+      }
+      day = addDays(day, 1);
+    }
+  }
+
+  // ── Step 2: force 0 for every closed-hour timestamp ──────────────────
+  // Covers: stray real readings after close / before open, multi-pool
+  // gaps (pool A timestamps during pool B's closed hours), and the
+  // anchor points injected above.
   for (const [ts, row] of byTs) {
     const h = new Date(ts).getHours();
     for (const { pool } of series) {
