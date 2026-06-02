@@ -162,7 +162,10 @@ export function OccupancyChart({ series, range, weather }) {
         data={chartData}
         margin={{ top: 8, right: 24, bottom: isWeek ? 58 : isMonth ? 24 : 4, left: 0 }}
       >
-        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+        {/* Vertical grid lines only for 24h (hourly) and all-time views.
+            Week/month use ReferenceLine for midnight separators instead — the
+            XAxis noon ticks would otherwise add a second line mid-column. */}
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={!hasSeparators} />
         <XAxis
           dataKey="ts"
           type="number"
