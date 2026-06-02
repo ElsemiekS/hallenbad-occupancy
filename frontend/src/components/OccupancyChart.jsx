@@ -88,22 +88,29 @@ export function OccupancyChart({ series, range, weather }) {
     }
   }
 
-  // Inject explicit 0 at each pool's open and close time per day so the line
-  // drops to 0 at closing and rises from 0 at opening instead of connecting
-  // the last reading of one day to the first reading of the next.
+  // Inject explicit 0 points 5 min before open and 5 min after close per pool
+  // per day so the line cleanly drops to 0 at closing (rather than connecting
+  // the last real reading across the night to the next day).
+  // The ±5 min offset avoids colliding with real data at the exact open/close
+  // bucket. The BUFFER guard prevents injecting zeros that fall outside the
+  // actual data range (which would extend the 24h chart back to opening time).
   if (byTs.size > 0) {
     const keys = [...byTs.keys()];
     const minTs = Math.min(...keys);
     const maxTs = Math.max(...keys);
+    const BUFFER = 15 * 60000; // 15-minute tolerance around the data range
+
     let day = startOfDay(new Date(minTs));
     const endDay = startOfDay(new Date(maxTs));
     while (day <= endDay) {
       for (const { pool } of series) {
         if (pool.openStart == null || pool.openEnd == null) continue;
+        const dayMs = day.getTime();
         for (const ts of [
-          day.getTime() + pool.openStart * 3600000,
-          day.getTime() + pool.openEnd   * 3600000,
+          dayMs + pool.openStart * 3600000 - 5 * 60000,  // 5 min before open → 0
+          dayMs + pool.openEnd   * 3600000 + 5 * 60000,  // 5 min after close → 0
         ]) {
+          if (ts < minTs - BUFFER || ts > maxTs + BUFFER) continue;
           if (!byTs.has(ts)) byTs.set(ts, { ts });
           const row = byTs.get(ts);
           if (row[pool.id] == null) row[pool.id] = 0;
